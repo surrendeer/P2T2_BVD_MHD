@@ -1,0 +1,80 @@
+#DESCRIPTION
+Param/SHOCKTUBE/PARAM.in: Rotor test		StringDescription
+
+#PLANET
+NONE			NamePlanet
+
+#IOUNITS
+NONE			NameIoUnits
+
+#NORMALIZATION
+NONE			NameNormalization
+
+#CHECKGRIDSIZE
+200			nI
+200			nJ
+1			nK
+2			MinBlockAll
+
+#GRID
+1			nRootBlockX
+1			nRootBlockY
+1			nRootBlockZ
+-0.0			xMin
+1.0				xMax
+-0.0			yMin
+1.0				yMax
+0.0				zMin
+0.0				zMax
+
+#GAMMA
+1.4		Gamma
+
+#OUTERBOUNDARY
+float              		xMinBc
+float  	        	xMaxBc
+float    			yMinBc
+float   			yMaxBc
+
+#DIVB
+f		UseDivbSource
+F		UseDivbDiffusion
+F		UseProjection
+t		UseConstrainB
+
+#NONCONSERVATIVE
+f		UseNonConservative
+
+#SCHEME      2 ghost cells
+2                      	 nOrder
+rusanov                  TypeFlux
+mc         	 		TypeLimiter
+1.5                   	 LimiterBeta
+
+#RUNGEKUTTA
+3		nStage
+0.8		CflExpl
+
+#SAVELOGFILE
+F		DoSaveLogfile
+
+#SAVERESTART
+F		DoSaverestart
+
+#SAVEINITIAL
+T		DoSaveInitial
+
+#SAVEPLOT
+1			nPlotfile
+z=0 raw idl_ascii       PlotString
+-1                       DnSavePlot
+0.01                 DtSavePlot
+0.0                     DxSavePlot
+{MHD}
+g                       NamePar
+
+#STOP
+-1		MaxIteration
+0.15		tSimulationMax
+
+
