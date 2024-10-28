@@ -3772,10 +3772,12 @@ contains
             !characteral veriable
 
          call P2T2_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI)
+
+         !CALL weno_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI)
       endif
 
 
-     ! write(1,*)"not body limiter BVD IS USED"
+    
 
     case('mc3')
        ! Calculate rightmost unlimited slope
@@ -3826,7 +3828,7 @@ contains
       real:: EigL(lMin-3:lMax+1,nVar,nVar)
       real:: EigR(lMin-3:lMax+1,nVar,nVar)
   
-      Logical::useP2T2,adjustDissipation
+      Logical::useP2T2_CharacterVar,adjustDissipation
       real:: FaceR_I_P2, FaceL_I_P2,ADlamda=0.5   !brio:>0.75
       real:: FaceR_I_Ts, FaceL_I_Ts
       real:: FaceR_I_Tl, FaceL_I_Tl
@@ -3849,16 +3851,20 @@ contains
          !surface index              i-1      i
           !                    |_______|_______|_______|_______|_______|
           !center index           i-1      i      i+1    
+                     
+
+      !useP2T2_CharacterVar=.false.
+      useP2T2_CharacterVar=.true.
+      adjustDissipation=.FALSE.!.true.!
+
+
+      IF(useP2T2_CharacterVar)then
   
-  
-      call get_3characteristicMatrix(lMin,lMax,Primitive_VI,&
+            call get_3characteristicMatrix(lMin,lMax,Primitive_VI,&
                 CharacterVar_L,CharacterVar_R,EigL,EigR)
 
                             
-               !useP2T2=.false.
-                useP2T2=.true.
-                adjustDissipation=.FALSE.!.true.!
-         IF(useP2T2)then
+
               do iVar = 1, nVar
                       !Cell index
                   do l=lMin-2,lMax+1!界面的L值-        
@@ -3897,7 +3903,7 @@ contains
                       Face_L(ivar,:) = FaceL_P2T2(:) 
                       Face_R(ivar,:) = FaceR_P2T2(:) 
             enddo!nvar loop
-         endif                                   
+                                            
   
   
               
@@ -3906,12 +3912,65 @@ contains
                   call back(EigR(l  ,:,:),Face_L(:,l),Face_L(:,l))        
                   call back(EigR(l-1,:,:),Face_R(:,l),Face_R(:,l))
               enddo
+
+      
+
+
+      else     !useP2T2_PrimitiveVar
+         do iVar = 1, nVar
+            !Cell index
+               do l=lMin-2,lMax+1!界面的L值-        
+                     Cellm  = Primitive_VI(iVar,l-1) 
+                     Cell   = Primitive_VI(iVar,l  ) 
+                     Cellp  = Primitive_VI( iVar,l+1)
+
+                     CALL reconstructL_P2T2(Cellm, Cell,Cellp,&
+                                          FaceL_I_P2, FaceL_I_Ts , FaceL_I_Tl )
+
+                     FaceL_P2(l) = FaceL_I_P2                   
+                     FaceL_Ts(l) = FaceL_I_Ts    
+                     FaceL_Tl(l) = FaceL_I_Tl 
+
+               enddo
+
+
+                     !Cell index
+               do l=lMin-2,lMax+1!界面的R值-        
+                     Cellm  = Primitive_VI(iVar,l-1) 
+                     Cell   = Primitive_VI(iVar,l  ) 
+                     Cellp  = Primitive_VI(iVar,l+1)
+                     CALL reconstructR_P2T2(Cellm, Cell,Cellp,&
+                                          FaceR_I_P2, FaceR_I_Ts , FaceR_I_Tl )
+
+                     FaceR_P2(l) = FaceR_I_P2 
+                     FaceR_Ts(l) = FaceR_I_Ts 
+                     FaceR_Tl(l) = FaceR_I_Tl
+
+               enddo
+
+
+
+               call  BVD_AD_Algorithm(lmin,lmax,FaceL_P2,FaceR_P2,FaceL_Ts,FaceR_Ts,&
+                                FaceL_Tl,FaceR_Tl,FaceL_P2T2,FaceR_P2T2)
+
+                     Face_L(ivar,:) = FaceL_P2T2(:) 
+                     Face_R(ivar,:) = FaceR_P2T2(:) 
+         enddo!nvar loop
+                    
+
+
+      endif !useP2T2_PrimitiveVar
+
+
+
+         !=================================================================
+         !======================return the difference======================
   
               do l=lMin-1,lMax
                   dVarLimL_VI(:,l) = Face_L(:,l) - Primitive_VI(:,l)
                   dVarLimR_VI(:,l) = Primitive_VI(:,l  ) - Face_R(:,l) 
               enddo
-               
+         !=================================================================     
   
   
   
@@ -3922,7 +3981,7 @@ contains
   
   
   
-      contains
+   contains
   
       subroutine get_3characteristicMatrix(&
           kMin,kMax,Primitive_VI,CharacterVar_L,CharacterVar_R,EigenmatrixL,EigenmatrixR)
@@ -4514,10 +4573,704 @@ contains
   
   
   
-  end subroutine P2T2_Scheme 
+   end subroutine P2T2_Scheme 
 
 
+   subroutine weno_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI) 
+      IMPLICIT none
+     
+      integer, intent(in):: lMin, lMax
+      real,    intent(in):: Beta!MUSCL‘s beta,not the thickness of thinc()
+      real, intent(inout):: Primitive_VI(1:nVar,1-nG:MaxIJK+nG)
+      real, intent(inout):: dVarLimR_VI(1:nVar,0:MaxIJK+1)!
+      real, intent(inout):: dVarLimL_VI(1:nVar,0:MaxIJK+1)!
+      real, dimension(Hi3_):: dVar1_I, dVar2_I !
+      real, dimension(nVar):: dVar1_V, dVar2_V ! unlimited left and right slopes
+   
+   
+      !上面部分是接口提供的变量，下面是自定义的
+  
+      integer :: l,j,iVar!ng=3
+      real ::cellmm,cellm,cell,cellp,cellpp
 
+      real:: CharacterVar_L(-1:1,nVar,lMin-2:lMax+1)
+      real:: CharacterVar_R(-1:1,nVar,lMin-2:lMax+1)
+
+      real:: CharacterVar5_L(-2:2,nVar,lMin-1:lMax)
+      real:: CharacterVar5_R(-2:2,nVar,lMin-1:lMax)
+
+      real:: EigL(lMin-3:lMax+1,nVar,nVar)
+      real:: EigR(lMin-3:lMax+1,nVar,nVar)
+  
+      Logical::useWENO3_CharacterVar
+
+      real:: FaceR_I_WENO, FaceL_I_WENO  
+      real:: FaceL_WENO(lmin-1:lmax),FaceR_WENO(lmin-1:lmax)
+      real:: FaceL_WENO5(lmin-1:lmax),FaceR_WENO5(lmin-1:lmax)
+
+      real:: Face_L(nVar,lmin-1:lmax),Face_R(nvar,lmin-1:lmax)
+      !notice
+      !lmax= maxIjk+1;  ng=3  ;TrueCell(lmin:lmax-1)  AllCell(lmin-3:lmax+2)
+               !                        n                
+           !---------!--------L!------- |=========|              |        !       L!        !
+           !         !R        !        |         |              | (lmax) !R       !        !
+           !___ng____!____ng___!___ng___|__lmin __|_____      ___|___ng___!___ng__ !___ng__ !
+  
+  
+         !surface index              i-1      i
+          !                    |_______|_______|_______|_______|_______|
+          !center index           i-1      i      i+1    
+                     
+
+      useWENO3_CharacterVar=.false.
+      !useWENO3_CharacterVar=.true.
+      
+
+      IF(useWENO3_CharacterVar)then
+  
+            call get_3characteristicMatrix(lMin,lMax,Primitive_VI,&
+                CharacterVar_L,CharacterVar_R,EigL,EigR)
+                          
+            do iVar = 1, nVar
+                      !Cell index
+                  do l=lMin-1,lMax!界面的L值-        
+                      Cellm  = CharacterVar_L(-1,iVar,l) 
+                      Cell   = CharacterVar_L( 0,iVar,l) 
+                      Cellp  = CharacterVar_L( 1,iVar,l)
+                      CALL weno_z3L(Cellm, Cell,Cellp,FaceL_I_WENO)
+                                              
+                      FaceL_WENO(l) = FaceL_I_WENO                    
+                  enddo
+                      !Cell index
+                  do l=lMin-1,lMax!界面的R值-        
+                      Cellm  = CharacterVar_R(-1,iVar,l) 
+                      Cell   = CharacterVar_R( 0,iVar,l) 
+                      Cellp  = CharacterVar_R( 1,iVar,l)
+                      CALL weno_z3R(Cellm, Cell,Cellp,FaceR_I_WENO )
+  
+                      FaceR_WENO(l) = FaceR_I_WENO 
+                  enddo
+
+  
+                      Face_L(ivar,:) = FaceL_WENO(:) 
+                      Face_R(ivar,:) = FaceR_WENO(:) 
+            enddo!nvar loop
+                                            
+
+            do l=lMin-1,lMax
+                  call back(EigR(l  ,:,:),Face_L(:,l),Face_L(:,l))        
+                  call back(EigR(l-1,:,:),Face_R(:,l),Face_R(:,l))
+            enddo
+ 
+      else!weno5
+
+            call get_5characteristicMatrix(lMin,lMax,Primitive_VI,&
+                   CharacterVar5_L,CharacterVar5_R,EigL,EigR)
+                   
+            do iVar = 1, nVar
+                  !Cell index
+               do l=lMin-1,lMax!界面的L值-
+                     Cellmm  = CharacterVar5_L(-2,iVar,l)        
+                     Cellm   = CharacterVar5_L(-1,iVar,l) 
+                     Cell    = CharacterVar5_L( 0,iVar,l) 
+                     Cellp   = CharacterVar5_L( 1,iVar,l)
+                     Cellpp  = CharacterVar5_L( 2,iVar,l)
+                     CALL weno_z5L(Cellmm,Cellm, Cell,Cellp,Cellpp,FaceL_I_WENO)
+                                             
+                     FaceL_WENO(l) = FaceL_I_WENO       
+  
+               enddo
+
+
+                  !Cell index
+               do l=lMin-1,lMax!界面的R值-      
+                     Cellmm  = CharacterVar5_R(-2,iVar,l)  
+                     Cellm   = CharacterVar5_R(-1,iVar,l) 
+                     Cell    = CharacterVar5_R( 0,iVar,l) 
+                     Cellp   = CharacterVar5_R( 1,iVar,l)
+                     Cellpp  = CharacterVar5_R( 2,iVar,l)
+                     CALL weno_z5R(Cellmm,Cellm, Cell,Cellp,Cellpp,FaceR_I_WENO )
+
+                     FaceR_WENO(l) = FaceR_I_WENO 
+               enddo
+
+
+                  Face_L(ivar,:) = FaceL_WENO(:) 
+                  Face_R(ivar,:) = FaceR_WENO(:) 
+            enddo!nvar loop
+                                     
+
+            do l=lMin-1,lMax
+               call back(EigR(l  ,:,:),Face_L(:,l),Face_L(:,l))        
+               call back(EigR(l-1,:,:),Face_R(:,l),Face_R(:,l))
+            enddo
+
+      endif 
+
+   !=================================================================
+   !======================return the difference======================
+
+      do l=lMin-1,lMax
+         dVarLimL_VI(:,l) = Face_L(:,l) - Primitive_VI(:,l)
+         dVarLimR_VI(:,l) = Primitive_VI(:,l  ) - Face_R(:,l) 
+      enddo
+   !=================================================================     
+
+  
+  
+  
+         
+  
+  
+  
+  
+  
+      contains
+  
+      subroutine get_3characteristicMatrix(&
+          kMin,kMax,Primitive_VI,CharacterVar_L,CharacterVar_R,EigenmatrixL,EigenmatrixR)
+          !PrimitiveVar W =================>> LW  CharacterVar
+          integer,intent(in)::  kMin, kMax
+          
+          real,intent(in)::Primitive_VI(nVar,kMin-3:kMax+2)
+          integer ::k,j,i
+          real:: Primitive_temp(nVar) 
+          
+          real:: CharacterVar_L(-1:1,nVar,kMin-2:kMax+1)
+          real:: CharacterVar_R(-1:1,nVar,kMin-2:kMax+1)
+  
+          real:: EigenmatrixL(kMin-3:kMax+1,nVar,nVar)!Powell's Eigenmatrix
+          real:: EigenmatrixR(kMin-3:kMax+1,nVar,nVar) 
+  
+          !---------------------------------------------------------          
+          
+          do k = kMin-3,kMax+1
+          ! get a temp  AVERAGE W(i+1/2) 
+              Primitive_temp(:) = 0.5*(Primitive_VI(:,k)+Primitive_VI(:,k+1))
+              
+          call eigenvector_powell(Primitive_temp,EigenmatrixL(k,:,:),EigenmatrixR(k,:,:))
+         
+         enddo
+         
+             !fortran 列优先
+
+          
+          !在i-1/2界面处冻结系数，求cell i在i-1/2的界面" 右值 "（cell i 的靠左边界值）
+          do k = kMin-2,kMax+1
+          !局部冻结系数法，用同一个EigL去乘相邻3个cell
+          !-----------------------------------------------------
+          CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-1),CharacterVar_R(-1,:,k))
+          CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k  ),CharacterVar_R( 0,:,k))
+          CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+1),CharacterVar_R( 1,:,k))
+
+
+          CALL map(EigenmatrixL(k  ,:,:),Primitive_VI(:,k-1),CharacterVar_L(-1,:,k))
+          CALL map(EigenmatrixL(k  ,:,:),Primitive_VI(:,k  ),CharacterVar_L( 0,:,k))
+          CALL map(EigenmatrixL(k  ,:,:),Primitive_VI(:,k+1),CharacterVar_L(+1,:,k))
+
+         enddo 
+
+          !----------------------------------------------------      
+  
+      end subroutine get_3characteristicMatrix
+      
+      subroutine get_5characteristicMatrix(&
+         kMin,kMax,Primitive_VI,CharacterVar_L,CharacterVar_R,EigenmatrixL,EigenmatrixR)
+         !PrimitiveVar W =================>> LW  CharacterVar
+         integer,intent(in)::  kMin, kMax
+         
+         real,intent(in)::Primitive_VI(nVar,kMin-3:kMax+2)
+         integer ::k,j,i
+         real:: Primitive_temp(nVar) 
+         
+         real:: CharacterVar_L(-2:2,nVar,kMin-1:kMax)
+         real:: CharacterVar_R(-2:2,nVar,kMin-1:kMax)
+ 
+         real:: EigenmatrixL(kMin-3:kMax+1,nVar,nVar)!Powell's Eigenmatrix
+         real:: EigenmatrixR(kMin-3:kMax+1,nVar,nVar) 
+ 
+         !---------------------------------------------------------          
+         
+         do k = kMin-3,kMax+1
+         ! get a temp  AVERAGE W(i+1/2) 
+             Primitive_temp(:) = 0.5*(Primitive_VI(:,k)+Primitive_VI(:,k+1))
+             
+         call eigenvector_powell(Primitive_temp,EigenmatrixL(k,:,:),EigenmatrixR(k,:,:))
+        
+        enddo
+        
+            !fortran 列优先
+
+         
+         !在i-1/2界面处冻结系数，求cell i在i-1/2的界面" 右值 "（cell i 的靠左边界值）
+         do k = kMin-1,kMax
+         !局部冻结系数法，用同一个EigL去乘相邻cell
+         !-----------------------------------------------------
+         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-2),CharacterVar_R(-2,:,k))
+         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-1),CharacterVar_R(-1,:,k))
+         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k  ),CharacterVar_R( 0,:,k))
+         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+1),CharacterVar_R( 1,:,k))
+         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+2),CharacterVar_R(+2,:,k))
+
+         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k-2),CharacterVar_L(-2,:,k))
+         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k-1),CharacterVar_L(-1,:,k))
+         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k  ),CharacterVar_L( 0,:,k))
+         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k+1),CharacterVar_L(+1,:,k))
+         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k+2),CharacterVar_L(+2,:,k))
+
+        enddo 
+
+         !----------------------------------------------------      
+ 
+      end subroutine get_5characteristicMatrix
+
+  
+      
+      subroutine weno_z3L(Cellm,cell,cellp,FaceL)
+         implicit none
+         real,intent(in)::Cellm,cell,cellp
+         real,intent(out)::FaceL
+         real::IS1,IS2,W1,W2,a1,a2,Tao5,u1,u2
+         !-----------------------------------
+
+         u1 = -0.5*cellm + 3./2.*cell
+         u2 =  0.5*cell +    0.5*cellp
+
+         IS1=  (Cell-Cellm)**2
+         IS2=  (Cellp-Cell)**2
+
+         Tao5=abs(IS1-IS2)
+         a1= (1./3.)*(1.0+Tao5/(1e-6+IS1))
+         a2= (2./3.)*(1.0+Tao5/(1e-6+IS2))
+
+         !a1= (1./3.)/(Tao5/(1e-6+IS1))
+         !a2= (2./3.)/(Tao5/(1e-6+IS2))
+         w1=a1/(a1+a2)
+         w2=a2/(a1+a2)
+     
+         FaceL = w1*u1+w2*u2
+      end subroutine weno_z3L
+
+      subroutine weno_z3R(Cellm,cell,cellp,FaceR)
+         implicit none
+         real,intent(in)::Cellm,cell,cellp
+         real,intent(out)::FaceR
+         real::IS1,IS2,W1,W2,a1,a2,Tao5,u1,u2
+         !-----------------------------------
+
+         u1 = -0.5*cellp + 3./2.*cell
+         u2 =  0.5*Cellm +   0.5*cell
+
+         IS1=  (Cell-Cellp)**2
+         IS2=  (Cellm-Cell)**2
+
+         Tao5=abs(IS1-IS2)
+         a1= (1./3.)*(1.0+Tao5/(1e-6+IS1))
+         a2= (2./3.)*(1.0+Tao5/(1e-6+IS2))
+         w1=a1/(a1+a2)
+         w2=a2/(a1+a2)
+     
+         FaceR = w1*u1+w2*u2
+      end subroutine weno_z3R
+
+
+      subroutine weno_z5L(Cellmm,Cellm,cell,cellp,cellpp,FaceL)
+         implicit none
+         real,intent(in)::Cellmm,Cellm,cell,cellp,cellpp
+         real,intent(out)::FaceL
+         real::h0,h1,h2,B0,B1,B2,epsilon,epsilon1,Tao5
+         integer::p
+         REAL ::W_tilde(0:2),W(0:2),W_New(0:2)
+         logical::wenoJS
+
+         epsilon=1.0e-6
+         epsilon1=1.0e-6
+         p=2
+         !-----------------------------------
+         h0 = ( 1./3.)*Cellmm - (7./6.)*Cellm +(11./6.)*cell
+         h1 = (-1./6.)*Cellm  + (5./6.)*Cell  +( 1./3.)*cellp
+         h2 = ( 1./3.)*Cell   + (5./6.)*Cellp -( 1./6.)*cellpp
+
+         B0=(13./12.)*(cellmm-2*cellm+  cell)**2+&
+            ( 1./ 4.)*(Cellmm-4*cellm+3*cell)**2
+
+         B1=(13./12.)*(cellm-2*cell+  cellp)**2+&
+            ( 1./ 4.)*(Cellm-cellp          )**2
+
+         B2=(13./12.)*(cell  -2*cellp+cellpp)**2+&
+            ( 1./ 4.)*(Cellpp-4*cellp+3*cell)**2
+
+            wenoJS=.FALSE.!.TRUE.!
+         if(wenoJS)then
+            W_tilde(0)=1./(epsilon+B0)**p
+            W_tilde(1)=6./(epsilon+B1)**p
+            W_tilde(2)=3./(epsilon+B2)**p
+
+            W(:)=W_tilde(:)/SUM(W_tilde)
+
+         else!wenoZ
+            !An improved weighted essentially non-oscillatory scheme 
+            !for hyperbolic conservation laws,2008,Rafael Borges
+            Tao5=ABS(B2-B0)
+            W_New(0)=1.*(1.0+ Tao5/(epsilon1+B0))
+            W_New(1)=6.*(1.0+ Tao5/(epsilon1+B1))!EQ(28)
+            W_New(2)=3.*(1.0+ Tao5/(epsilon1+B2))
+
+            W(:)=W_New(:)/SUM(W_New)
+         ENDIF
+         
+
+
+         FaceL = W(0)*h0+W(1)*h1+W(2)*h2
+
+        ! write(*,*),"W_tilde(:)",W_tilde(:),SUM(W_tilde)
+        ! write(*,*),"W(:)",W(:),SUM(W)
+        ! write(*,*),"===",Cellmm,Cellm,cell,cellp,cellpp,FaceL
+
+
+      end subroutine weno_z5L
+
+      subroutine weno_z5R(Cellmm,Cellm,cell,cellp,cellpp,FaceR)
+         implicit none
+         real,intent(in)::Cellmm,Cellm,cell,cellp,cellpp
+         real,intent(out)::FaceR
+         real::h0,h1,h2,B0,B1,B2,epsilon,epsilon1,Tao5
+         integer::p
+         REAL ::W_tilde(0:2),W(0:2),W_New(0:2)
+         logical::wenoJS
+
+         epsilon=1.0e-6
+         epsilon1=1.0e-6
+         p=2
+         !-----------------------------------
+         h0 = ( 1./3.)*cellpp - (7./6.)*cellp +(11./6.)*cell
+         h1 = (-1./6.)*cellp  + (5./6.)*Cell  +( 1./3.)*cellm
+         h2 = ( 1./3.)*Cell   + (5./6.)*Cellm -( 1./6.)*cellmm
+
+         B0=(13./12.)*(cellmm-2*cellm+  cell)**2+&
+            ( 1./ 4.)*(Cellmm-4*cellm+3*cell)**2
+
+         B1=(13./12.)*(cellm -2*cell + cellp)**2+&
+            ( 1./ 4.)*(Cellm-cellp          )**2
+
+         B2=(13./12.)*(cell  -2*cellp+cellpp)**2+&
+            ( 1./ 4.)*(Cellpp-4*cellp+3*cell)**2
+
+            wenoJS=.FALSE.!.TRUE.!
+      if(wenoJS)then
+         W_tilde(0)= 1./(epsilon+B0)**p
+         W_tilde(1)= 6./(epsilon+B1)**p
+         W_tilde(2)= 3./(epsilon+B2)**p
+
+         W(:)=W_tilde(:)/SUM(W_tilde)
+      else!wenoZ
+         !An improved weighted essentially non-oscillatory scheme 
+         !for hyperbolic conservation laws,2008,Rafael Borges
+         Tao5=ABS(B2-B0)
+         W_New(0)=1.*(1.0+ Tao5/(epsilon1+B0))
+         W_New(1)=6.*(1.0+ Tao5/(epsilon1+B1))!EQ(28)
+         W_New(2)=3.*(1.0+ Tao5/(epsilon1+B2))
+
+         W(:)=W_New(:)/SUM(W_New)
+      ENDIF
+
+         FaceR = W(0)*h0+W(1)*h1+W(2)*h2
+      end subroutine weno_z5R
+
+      subroutine eigenvector_powell(w,L,R)
+         use ModPhysics, ONLY: Gamma
+         use ModVarIndexes, nVarAll => nVar
+         implicit none
+         !---------- surface ----------
+ 
+         real,intent(in)::w(8)
+         real::L(8,8),R(8,8)
+ 
+         !---------   inner  ----------
+         REAL:: d , un , ut , uw , Bn , Bt , Bw , p
+ 
+         real :: bt_y , bt_z , vax2 , c , va2 , cf2 , cs2 , af , as ,sgn
+ 
+         integer ::loop
+         real::MAT(nVar,nVar)
+ 
+         d =w(1)
+         un=w(2)
+         ut=w(3)
+         uw=w(4)
+         bn=w(5)
+         bt=w(6)
+         bw=w(7)
+         p =w(8)
+ 
+         !if((bt**2+bw**2)==0.d0)then
+         if((bt**2+bw**2)<=0.1e-6)then
+         bt_y=1.0/(dsqrt(2.0))
+         bt_z=1.0/(dsqrt(2.0))
+         else
+         bt_y=bt/(dsqrt(bt**2+bw**2))
+         bt_z=bw/(dsqrt(bt**2+bw**2))
+         end if
+ 
+         vax2=bn**2/d
+ 
+         c=dsqrt(GAMMA*p/d)
+ 
+         va2=(bn**2+bt**2+bw**2)/d
+ 
+         cf2=0.50*((va2+c**2)+dsqrt((va2+c**2)**2-4.0*vax2*c**2))
+         cs2=0.50*((va2+c**2)-dsqrt((va2+c**2)**2-4.0*vax2*c**2))
+ 
+         af=dsqrt(dabs(c**2-cs2)/(cf2-cs2))
+         as=dsqrt(dabs(cf2-c**2)/(cf2-cs2))
+ 
+ 
+ 
+         if(bn>0.0) then
+         sgn=1.0
+         else
+         sgn=-1.0
+         end if
+ 
+ 
+ 
+         !---------- left eigenmatrix ----------
+         l(1,1)=1.0
+         l(1,2)=0.0
+         l(1,3)=0.0
+         l(1,4)=0.0
+         l(1,5)=0.0
+         l(1,6)=0.0
+         l(1,7)=0.0
+         l(1,8)=-1.0/c**2
+ 
+ 
+         l(2,1)=0.0
+         l(2,2)=0.0
+         l(2,3)=-bt_z/dsqrt(2.0)
+         l(2,4)= bt_y/dsqrt(2.0)
+         l(2,5)=0.0
+         l(2,6)= bt_z/dsqrt(2.0*d)
+         l(2,7)=-bt_y/dsqrt(2.0*d)
+         l(2,8)=0.0
+ 
+         l(3,1)=0.0
+         l(3,2)=0.0
+         l(3,3)=-bt_z/dsqrt(2.0)
+         l(3,4)= bt_y/dsqrt(2.0)
+         l(3,5)=0.0
+         l(3,6)=-bt_z/dsqrt(2.0*d)
+         l(3,7)= bt_y/dsqrt(2.0*d)
+         l(3,8)=0.0
+ 
+         l(4,1)=0.0
+         l(4,2)=(af*dsqrt(cf2))/(2.0*(c**2))
+         l(4,3)=-((as*dsqrt(cs2)*bt_y)/(2.0*(c**2)))*sgn
+         l(4,4)=-((as*dsqrt(cs2)*bt_z)/(2.0*(c**2)))*sgn
+         l(4,5)=0.0
+         l(4,6)=(as*bt_y)/(2.0*dsqrt(d)*c)
+         l(4,7)=(as*bt_z)/(2.0*dsqrt(d)*c)
+         l(4,8)=af/(2.d0*d*(c**2))
+ 
+         l(5,1)=0.0
+         l(5,2)=-(af*dsqrt(cf2))/(2.0*(c**2))
+         l(5,3)=((as*dsqrt(cs2)*bt_y)/(2.0*(c**2)))*sgn
+         l(5,4)=((as*dsqrt(cs2)*bt_z)/(2.0*(c**2)))*sgn
+         l(5,5)=0.0
+         l(5,6)=(as*bt_y)/(2.0*dsqrt(d)*c)
+         l(5,7)=(as*bt_z)/(2.0*dsqrt(d)*c)
+         l(5,8)=af/(2.0*d*(c**2))
+ 
+         l(6,1)=0.0
+         l(6,2)=(as*dsqrt(cs2))/(2.0*(c**2))
+         l(6,3)=(af*dsqrt(cf2)*bt_y)/(2.0*(c**2))*sgn
+         l(6,4)=(af*dsqrt(cf2)*bt_z)/(2.0*(c**2))*sgn
+         l(6,5)=0.0
+         l(6,6)=-1.0*(af*bt_y)/(2.0*dsqrt(d)*c)
+         l(6,7)=-1.0*(af*bt_z)/(2.0*dsqrt(d)*c)
+         l(6,8)=as/(2.0*d*(c**2))
+ 
+         l(7,1)=0.0
+         l(7,2)=-1.0*(as*dsqrt(cs2))/(2.0*(c**2))
+         l(7,3)=-1.0*(af*dsqrt(cf2)*bt_y)/(2.0*(c**2))*sgn
+         l(7,4)=-1.0*(af*dsqrt(cf2)*bt_z)/(2.0*(c**2))*sgn
+         l(7,5)=0.0
+         l(7,6)=-1.0*(af*bt_y)/(2.0*dsqrt(d)*c)
+         l(7,7)=-1.0*(af*bt_z)/(2.0*dsqrt(d)*c)
+         l(7,8)=as/(2.0*d*(c**2))
+ 
+         l(8,1)=0.0
+         l(8,2)=0.0
+         l(8,3)=0.0
+         l(8,4)=0.0
+         l(8,5)=1.0
+         l(8,6)=0.0
+         l(8,7)=0.0
+         l(8,8)=0.0
+ 
+ 
+         !---------- right eigenmatrix ----------
+         r(1,1)=1.0
+         r(1,2)=0.0
+         r(1,3)=0.0
+         r(1,4)=d*af
+         r(1,5)=d*af
+         r(1,6)=d*as
+         r(1,7)=d*as
+         r(1,8)=0.0
+ 
+         r(2,1)=0.0
+         r(2,2)=0.0
+         r(2,3)=0.0
+         r(2,4)=af*dsqrt(cf2)
+         r(2,5)=-1.0*af*dsqrt(cf2)
+         r(2,6)=as*dsqrt(cs2)
+         r(2,7)=-1.0*as*dsqrt(cs2)
+         r(2,8)=0.0
+ 
+         r(3,1)=0.0
+         r(3,2)=-1.0*bt_z/dsqrt(2.0)
+         r(3,3)=-1.0*bt_z/dsqrt(2.0)
+         r(3,4)=-1.0*as*(dsqrt(cs2))*bt_y*sgn
+         r(3,5)=as*(dsqrt(cs2))*bt_y*sgn
+         r(3,6)=af*(dsqrt(cf2))*bt_y*sgn
+         r(3,7)=-1.0*af*(dsqrt(cf2))*bt_y*sgn
+         r(3,8)=0.0
+ 
+         r(4,1)=0.0
+         r(4,2)=bt_y/dsqrt(2.0)
+         r(4,3)=bt_y/dsqrt(2.0)
+         r(4,4)=-1.0*as*(dsqrt(cs2))*bt_z*sgn
+         r(4,5)=as*(dsqrt(cs2))*bt_z*sgn
+         r(4,6)=af*(dsqrt(cf2))*bt_z*sgn
+         r(4,7)=-1.0*af*(dsqrt(cf2))*bt_z*sgn
+         r(4,8)=0.0
+ 
+         r(5,1)=0.0
+         r(5,2)=0.0
+         r(5,3)=0.0
+         r(5,4)=0.0
+         r(5,5)=0.0
+         r(5,6)=0.0
+         r(5,7)=0.0
+         r(5,8)=1.0
+ 
+         r(6,1)=0.0
+         r(6,2)=dsqrt(d/2.0)*bt_z
+         r(6,3)=-1.0*dsqrt(d/2.0)*bt_z
+         r(6,4)=as*dsqrt(d)*c*bt_y
+         r(6,5)=as*dsqrt(d)*c*bt_y
+         r(6,6)=-1.0*af*dsqrt(d)*c*bt_y
+         r(6,7)=-1.0*af*dsqrt(d)*c*bt_y
+         r(6,8)=0.0
+ 
+         r(7,1)=0.0
+         r(7,2)=-1.0*dsqrt(d/2.0)*bt_y
+         r(7,3)=dsqrt(d/2.0)*bt_y
+         r(7,4)=as*dsqrt(d)*c*bt_z
+         r(7,5)=as*dsqrt(d)*c*bt_z
+         r(7,6)=-1.0*af*dsqrt(d)*c*bt_z
+         r(7,7)=-1.0*af*dsqrt(d)*c*bt_z
+         r(7,8)=0.0
+ 
+         r(8,1)=0.0
+         r(8,2)=0.0
+         r(8,3)=0.0
+         r(8,4)=af*d*(c**2)
+         r(8,5)=af*d*(c**2)
+         r(8,6)=as*d*(c**2)
+         r(8,7)=as*d*(c**2)
+         r(8,8)=0.0
+ 
+         MAT=MATMUL(L,R)
+ 
+        ! do loop=1,nVar
+        !     write(*,"(8(f5.2))")  MAT(loop,:)
+        !    write(*,*),"----------------------"
+         !end do
+
+         !stop
+ 
+ 
+ 
+ 
+         return 
+      end subroutine eigenvector_powell
+
+        
+      subroutine map(L,W,LW)
+         !use ModVarIndexes, nVarAll => nVar 
+         implicit none 
+         real::L(8,8),W(8)
+         real::LW(8)                   
+
+         LW(1)= L(1,1)*W(1) + L(1,2)*W(2) + L(1,3)*W(3) + L(1,4)*W(4) + &
+                L(1,5)*W(5) + L(1,6)*W(6) + L(1,7)*W(7) + L(1,8)*W(8)
+
+         LW(2)= L(2,1)*W(1) + L(2,2)*W(2) + L(2,3)*W(3) + L(2,4)*W(4) + &
+                L(2,5)*W(5) + L(2,6)*W(6) + L(2,7)*W(7) + L(2,8)*W(8)
+
+         LW(3)= L(3,1)*W(1) + L(3,2)*W(2) + L(3,3)*W(3) + L(3,4)*W(4) + &
+                L(3,5)*W(5) + L(3,6)*W(6) + L(3,7)*W(7) + L(3,8)*W(8)
+
+         LW(4)= L(4,1)*W(1) + L(4,2)*W(2) + L(4,3)*W(3) + L(4,4)*W(4) + &
+                L(4,5)*W(5) + L(4,6)*W(6) + L(4,7)*W(7) + L(4,8)*W(8)
+
+         LW(5)= L(5,1)*W(1) + L(5,2)*W(2) + L(5,3)*W(3) + L(5,4)*W(4) + &
+                L(5,5)*W(5) + L(5,6)*W(6) + L(5,7)*W(7) + L(5,8)*W(8)
+
+         LW(6)= L(6,1)*W(1) + L(6,2)*W(2) + L(6,3)*W(3) + L(6,4)*W(4) + &
+                L(6,5)*W(5) + L(6,6)*W(6) + L(6,7)*W(7) + L(6,8)*W(8)
+
+         LW(7)= L(7,1)*W(1) + L(7,2)*W(2) + L(7,3)*W(3) + L(7,4)*W(4) + &
+                L(7,5)*W(5) + L(7,6)*W(6) + L(7,7)*W(7) + L(7,8)*W(8)
+
+         LW(8)= L(8,1)*W(1) + L(8,2)*W(2) + L(8,3)*W(3) + L(8,4)*W(4) + &
+                L(8,5)*W(5) + L(8,6)*W(6) + L(8,7)*W(7) + L(8,8)*W(8)
+             
+         return 
+      end subroutine map
+
+      subroutine back(R,LW,W)
+
+         use ModVarIndexes, nVarAll => nVar 
+         implicit none 
+         real::R(8,8),W(8)
+         real::LW(8)
+         !------------------------
+         W(1)=R(1,1)*LW(1) + R(1,2)*LW(2) + R(1,3)*LW(3) + R(1,4)*LW(4) +&
+              R(1,5)*LW(5) + R(1,6)*LW(6) + R(1,7)*LW(7) + R(1,8)*LW(8)
+   
+         W(2)=R(2,1)*LW(1) + R(2,2)*LW(2) + R(2,3)*LW(3) + R(2,4)*LW(4) + &
+              R(2,5)*LW(5) + R(2,6)*LW(6) + R(2,7)*LW(7) + R(2,8)*LW(8)
+   
+         W(3)=R(3,1)*LW(1) + R(3,2)*LW(2) + R(3,3)*LW(3) + R(3,4)*LW(4) +&
+              R(3,5)*LW(5) + R(3,6)*LW(6) + R(3,7)*LW(7) + R(3,8)*LW(8)
+   
+         W(4)=R(4,1)*LW(1) + R(4,2)*LW(2) + R(4,3)*LW(3) + R(4,4)*LW(4) + &
+              R(4,5)*LW(5) + R(4,6)*LW(6) + R(4,7)*LW(7) + R(4,8)*LW(8)
+   
+         W(5)=R(5,1)*LW(1) + R(5,2)*LW(2) + R(5,3)*LW(3) + R(5,4)*LW(4) + &
+              R(5,5)*LW(5) + R(5,6)*LW(6) + R(5,7)*LW(7) + R(5,8)*LW(8)
+   
+         W(6)=R(6,1)*LW(1) + R(6,2)*LW(2) + R(6,3)*LW(3) + R(6,4)*LW(4) + &
+              R(6,5)*LW(5) + R(6,6)*LW(6) + R(6,7)*LW(7) + R(6,8)*LW(8)
+   
+         W(7)=R(7,1)*LW(1) + R(7,2)*LW(2) + R(7,3)*LW(3) + R(7,4)*LW(4) +&
+              R(7,5)*LW(5) + R(7,6)*LW(6) + R(7,7)*LW(7) + R(7,8)*LW(8)
+   
+         W(8)=R(8,1)*LW(1) + R(8,2)*LW(2) + R(8,3)*LW(3) + R(8,4)*LW(4) +&
+              R(8,5)*LW(5) + R(8,6)*LW(6) + R(8,7)*LW(7) + R(8,8)*LW(8)
+      
+         
+         return 
+      end subroutine back
+   !--------------
+  
+  
+  
+  
+   end subroutine weno_Scheme 
  
 
         
@@ -4529,4 +5282,3 @@ contains
 
 end module ModFaceValue
 !==============================================================================
-
