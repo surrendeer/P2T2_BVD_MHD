@@ -3773,7 +3773,7 @@ contains
 
          call P2T2_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI)
 
-         !CALL weno_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI)
+         !
       endif
 
 
@@ -3797,6 +3797,13 @@ contains
        end do
 
        !write(*,*)"mc3       not body limiter"
+
+    case("BVD")
+      call P2T2_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI)
+
+    case("WENO")
+      CALL weno_Scheme(lmin,lmax,Beta,Primitive_VI,dVarLimL_VI,dVarLimR_VI)
+
     case default
        call stop_mpi('limiter: unknown TypeLimiter='//TypeLimiter)
     end select
@@ -3855,7 +3862,7 @@ contains
 
       !useP2T2_CharacterVar=.false.
       useP2T2_CharacterVar=.true.
-      adjustDissipation=.FALSE.!.true.!
+      adjustDissipation=.true.!.FALSE.!
 
 
       IF(useP2T2_CharacterVar)then
@@ -3902,6 +3909,9 @@ contains
   
                       Face_L(ivar,:) = FaceL_P2T2(:) 
                       Face_R(ivar,:) = FaceR_P2T2(:) 
+
+
+
             enddo!nvar loop
                                             
   
@@ -4031,22 +4041,7 @@ contains
 
          enddo 
 
-         open(unit=10, file='output.txt', status='replace')
 
-         ! Loop over the first dimension (k)
-         do k = kMin-3, kMax+1
-             write(10, "(I5)", advance="no") k  ! Write k first
-     
-             ! Write each row of EigenmatrixL for the current k
-             do j = 1, 8  ! Iterate over rows
-                 write(10, "(8F10.4)", advance="no") (EigenmatrixL(k - (kMin-3), j, i), i = 1, 8)
-             end do
-     
-             write(10, *)  ! New line after each k
-         end do
-     
-         ! Close the file
-         close(10)
          
 
           !----------------------------------------------------      
@@ -4258,7 +4253,7 @@ contains
           r(8,7)=as*d*(c**2)
           r(8,8)=0.0
   
-          MAT=MATMUL(L,R)
+         ! MAT=MATMUL(L,R)
   
          ! do loop=1,nVar
          !     write(*,"(8(f5.2))")  MAT(loop,:)
@@ -4492,6 +4487,10 @@ contains
   
           endif
           enddo
+
+          !thinc test
+          !FaceL_final(:) =  FaceL_Ts(: )  
+         ! FaceR_final(:) =  FaceR_Ts(: )    
   
   
   
@@ -4622,8 +4621,8 @@ contains
           !center index           i-1      i      i+1    
                      
 
-      useWENO3_CharacterVar=.false.
-      !useWENO3_CharacterVar=.true.
+      !useWENO3_CharacterVar=.false.
+      useWENO3_CharacterVar=.true.
       
 
       IF(useWENO3_CharacterVar)then
@@ -4655,6 +4654,24 @@ contains
                       Face_L(ivar,:) = FaceL_WENO(:) 
                       Face_R(ivar,:) = FaceR_WENO(:) 
             enddo!nvar loop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                                             
 
             do l=lMin-1,lMax
@@ -4806,17 +4823,29 @@ contains
          do k = kMin-1,kMax
          !局部冻结系数法，用同一个EigL去乘相邻cell
          !-----------------------------------------------------
-         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-2),CharacterVar_R(-2,:,k))
-         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-1),CharacterVar_R(-1,:,k))
-         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k  ),CharacterVar_R( 0,:,k))
-         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+1),CharacterVar_R( 1,:,k))
-         CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+2),CharacterVar_R(+2,:,k))
+        ! CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-2),CharacterVar_R(-2,:,k))
+        ! CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-1),CharacterVar_R(-1,:,k))
+         !CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k  ),CharacterVar_R( 0,:,k))
+         !CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+1),CharacterVar_R( 1,:,k))
+         !CALL map(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+2),CharacterVar_R(+2,:,k))
 
-         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k-2),CharacterVar_L(-2,:,k))
-         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k-1),CharacterVar_L(-1,:,k))
-         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k  ),CharacterVar_L( 0,:,k))
-         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k+1),CharacterVar_L(+1,:,k))
-         CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k+2),CharacterVar_L(+2,:,k))
+         CharacterVar_R(-2,:,k)=matmul(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-2))
+         CharacterVar_R(-1,:,k)=matmul(EigenmatrixL(k-1,:,:),Primitive_VI(:,k-1))
+         CharacterVar_R(+0,:,k)=matmul(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+0))
+         CharacterVar_R(+1,:,k)=matmul(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+1))
+         CharacterVar_R(+2,:,k)=matmul(EigenmatrixL(k-1,:,:),Primitive_VI(:,k+2))
+
+         CharacterVar_L(-2,:,k)=matmul(EigenmatrixL(k ,:,:),Primitive_VI(:,k-2))
+         CharacterVar_L(-1,:,k)=matmul(EigenmatrixL(k ,:,:),Primitive_VI(:,k-1))
+         CharacterVar_L(+0,:,k)=matmul(EigenmatrixL(k ,:,:),Primitive_VI(:,k+0))
+         CharacterVar_L(+1,:,k)=matmul(EigenmatrixL(k ,:,:),Primitive_VI(:,k+1))
+         CharacterVar_L(+2,:,k)=matmul(EigenmatrixL(k ,:,:),Primitive_VI(:,k+2))
+
+         !CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k-2),CharacterVar_L(-2,:,k))
+         !CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k-1),CharacterVar_L(-1,:,k))
+         !CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k  ),CharacterVar_L( 0,:,k))
+         !CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k+1),CharacterVar_L(+1,:,k))
+         !CALL map(EigenmatrixL(k ,:,:),Primitive_VI(:,k+2),CharacterVar_L(+2,:,k))
 
         enddo 
 
@@ -4883,7 +4912,7 @@ contains
          REAL ::W_tilde(0:2),W(0:2),W_New(0:2)
          logical::wenoJS
 
-         epsilon=1.0e-6
+         epsilon=1.0e-12
          epsilon1=1.0e-6
          p=2
          !-----------------------------------
@@ -4939,7 +4968,7 @@ contains
          REAL ::W_tilde(0:2),W(0:2),W_New(0:2)
          logical::wenoJS
 
-         epsilon=1.0e-6
+         epsilon=1.0e-12
          epsilon1=1.0e-6
          p=2
          !-----------------------------------
