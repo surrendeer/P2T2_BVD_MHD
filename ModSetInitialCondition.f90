@@ -49,8 +49,9 @@ module ModSetInitialCondition
 
   logical::test2DAcousticWave  =.false.!.true.!  for Eular Equation
 
-  logical::test30DegreesAlfven=.false.!.true.!
-
+  logical::test30DegreesAlfven=.false.!.true.!  Old pi/6
+  logical::testsmooothAlfven=.false.! .true.!   new pi/4
+  
   logical::testRotor=.false.!.true.!
 
   logical::testCloud=.false.!.true.!.true.!
@@ -61,7 +62,7 @@ module ModSetInitialCondition
   
   logical::testRayleighTaylorHD=.false. !.true.!
 
-  logical::test2DRiemann =.true.!.false.! ! for Eular Equation
+  logical::test2DRiemann =.false.!.true.! ! for Eular Equation
 
   logical::testSphericalExplosion=.false.!.true.!
   logical::testOrszarg=.false.!.true.!
@@ -199,7 +200,7 @@ contains
     real   :: SinSlope, CosSlope, Rot_II(2,2), x, y
     integer:: i, j, k, iVar, iBoundary, iFluid, iGang
     real:: cPhi,eta_x,eta_y
-    real::cos_alpha=cos(cPi/6.0),sin_alpha=sin(cPi/6.0)
+    real::cos_alpha,sin_alpha,cbeta,v_parallel,v_perpendicular,B_parallel,B_perpendicular
     real::radius ,func_radius
 
     logical:: DoTestCell
@@ -349,9 +350,11 @@ contains
                                  cos(0.25*cPi*(sqrt((x-0.5)**2+(y-0.5)**2)/0.15))**6
                      endif
 
-            elseif(test30DegreesAlfven)then 
+            elseif(test30DegreesAlfven)then !pi/6 is used
                x = Xyz_DGB(x_,i,j,k,iBlock)
                y = Xyz_DGB(y_,i,j,k,iBlock)
+               cos_alpha=cos(cPi/6.0)
+               sin_alpha=sin(cPi/6.0)
 
                 State_VGB(1,i,j,k,iBlock)=1.0
 
@@ -371,6 +374,40 @@ contains
 
                 State_VGB(8,i,j,k,iBlock)=0.1
 
+                !Liu, M., Zhang, M., Li, C., Shen, F., 2021. A new locally divergence-free wls-eno scheme based on 
+                !the positivity-preserving finite volume method for ideal mhd equations
+            elseif(testsmooothAlfven)then !pi/4 is used
+                  x = Xyz_DGB(x_,i,j,k,iBlock)
+                  y = Xyz_DGB(y_,i,j,k,iBlock)
+                  cos_alpha=cos(cPi/4.0)
+                  sin_alpha=sin(cPi/4.0)
+
+                  cbeta=(x*cos_alpha+y*sin_alpha)
+                  v_parallel=0.0
+                  v_perpendicular=0.1*sin(cTwoPi*cbeta)
+                  B_parallel=1.0
+                  B_perpendicular=v_perpendicular
+
+   
+                   State_VGB(1,i,j,k,iBlock)=1.0
+   
+                   State_VGB(2,i,j,k,iBlock)=&
+                                             cos_alpha*v_parallel-sin_alpha*v_perpendicular
+                   State_VGB(3,i,j,k,iBlock)=&
+                                             cos_alpha*v_perpendicular+sin_alpha*v_parallel
+                   State_VGB(4,i,j,k,iBlock)=&
+                                             0.1*cos(cTwoPi*cbeta)
+   
+                   State_VGB(5,i,j,k,iBlock)=&
+                                             cos_alpha*B_parallel-sin_alpha*B_perpendicular
+                              
+                   State_VGB(6,i,j,k,iBlock)=&
+                                             cos_alpha*B_perpendicular+sin_alpha*B_parallel
+                             
+                   State_VGB(7,i,j,k,iBlock)=0.1*cos(cTwoPi*cbeta)
+                        
+                   State_VGB(8,i,j,k,iBlock)=0.1
+
             elseif(testRotor)then 
                x = Xyz_DGB(x_,i,j,k,iBlock)
                y = Xyz_DGB(y_,i,j,k,iBlock) 
@@ -380,30 +417,30 @@ contains
                   if (radius<0.1)then
 
                      State_VGB(1,i,j,k,iBlock)= 10.0
-                     State_VGB(8,i,j,k,iBlock)= 1
-                     State_VGB(5,i,j,k,iBlock)= 5.0/(sqrt(4*cPi))
+                     State_VGB(8,i,j,k,iBlock)= 0.5
+                     State_VGB(5,i,j,k,iBlock)= 2.50/(sqrt(4*cPi))
                      State_VGB(6,i,j,k,iBlock)= 0.0
                      State_VGB(7,i,j,k,iBlock)= 0.0
      
-                     State_VGB(2,i,j,k,iBlock)= (-2.0*(y-0.5)/0.1)*State_VGB(1,i,j,k,iBlock)
-                     State_VGB(3,i,j,k,iBlock)= ( 2.0*(x-0.5)/0.1)*State_VGB(1,i,j,k,iBlock)
+                     State_VGB(2,i,j,k,iBlock)= (-(y-0.5)/0.1)*State_VGB(1,i,j,k,iBlock)
+                     State_VGB(3,i,j,k,iBlock)= ( (x-0.5)/0.1)*State_VGB(1,i,j,k,iBlock)
                      State_VGB(4,i,j,k,iBlock)=    0.0
 
                   elseif(radius.ge.0.1 .and. radius < 0.115)then
 
                      State_VGB(1,i,j,k,iBlock)= 1.0+9.0*func_radius
-                     State_VGB(8,i,j,k,iBlock)= 1
-                     State_VGB(5,i,j,k,iBlock)= 5.0/(sqrt(4*cPi))
+                     State_VGB(8,i,j,k,iBlock)= 0.5
+                     State_VGB(5,i,j,k,iBlock)= 2.50/(sqrt(4*cPi))
                      State_VGB(6,i,j,k,iBlock)= 0.0
                      State_VGB(7,i,j,k,iBlock)= 0.0
      
-                     State_VGB(2,i,j,k,iBlock)= -2.0*(y-0.5)*func_radius/radius*State_VGB(1,i,j,k,iBlock)
-                     State_VGB(3,i,j,k,iBlock)=  2.0*(x-0.5)*func_radius/radius*State_VGB(1,i,j,k,iBlock)
+                     State_VGB(2,i,j,k,iBlock)= -1.0*(y-0.5)*func_radius/radius*State_VGB(1,i,j,k,iBlock)
+                     State_VGB(3,i,j,k,iBlock)=  1.0*(x-0.5)*func_radius/radius*State_VGB(1,i,j,k,iBlock)
                      State_VGB(4,i,j,k,iBlock)=  0.0
                   elseif(radius .ge. 0.115)then
                      State_VGB(1,i,j,k,iBlock)= 1.0
-                     State_VGB(8,i,j,k,iBlock)= 1
-                     State_VGB(5,i,j,k,iBlock)= 5.0/(sqrt(4*cPi))
+                     State_VGB(8,i,j,k,iBlock)= 0.5
+                     State_VGB(5,i,j,k,iBlock)= 2.50/(sqrt(4*cPi))
                      State_VGB(6,i,j,k,iBlock)= 0.0
                      State_VGB(7,i,j,k,iBlock)= 0.0
      
@@ -457,11 +494,11 @@ contains
                x = Xyz_DGB(x_,i,j,k,iBlock)
                y = Xyz_DGB(y_,i,j,k,iBlock)  
                radius = sqrt((x-0.5)**2+(y-0.5)**2) 
-               if(radius>0.1)then
+               if(radius>0.1-1.d-15)then
                   State_VGB(1,i,j,k,iBlock)= 1.0
                   State_VGB(8,i,j,k,iBlock)= 0.1
-                  State_VGB(5,i,j,k,iBlock)= 100.0/(sqrt(8*cPi))
-                  State_VGB(6,i,j,k,iBlock)= 0.0     ! 100.0/(sqrt(8*cPi))
+                  State_VGB(5,i,j,k,iBlock)= 100.0/(sqrt(4*cPi))!sqrt(2.0)/2.0   !
+                  State_VGB(6,i,j,k,iBlock)= 0.0!sqrt(2.0)/2.0   !100.0/(sqrt(4*cPi))!0.0     ! 
                   State_VGB(7,i,j,k,iBlock)= 0.0
 
                   State_VGB(2,i,j,k,iBlock)=  0.0
@@ -469,9 +506,9 @@ contains
                   State_VGB(4,i,j,k,iBlock)=  0.0
                else 
                   State_VGB(1,i,j,k,iBlock)= 1.0
-                  State_VGB(8,i,j,k,iBlock)= 1000.0
-                  State_VGB(5,i,j,k,iBlock)= 100.0/(sqrt(8*cPi))
-                  State_VGB(6,i,j,k,iBlock)= 0.0         !100.0/(sqrt(8*cPi))
+                  State_VGB(8,i,j,k,iBlock)= 1000.0!10.0
+                  State_VGB(5,i,j,k,iBlock)= 100.0/(sqrt(4*cPi))!sqrt(2.0)/2.0        !100.0/(sqrt(8*cPi))
+                  State_VGB(6,i,j,k,iBlock)= 0.0!sqrt(2.0)/2.0        !100.0/(sqrt(8*cPi))!0.0         !100.0/(sqrt(8*cPi))
                   State_VGB(7,i,j,k,iBlock)= 0.0
    
                   State_VGB(2,i,j,k,iBlock)=  0.0
